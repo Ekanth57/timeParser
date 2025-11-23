@@ -1,132 +1,95 @@
-// parser.js
+// test.js
 
-/**
- * Parse a relative time expression like "now()+1d+3h-10m"
- * and return a Date (in UTC).
- *
- * Supported:
- *   - Modifier: now()
- *   - Operators: +, -
- *   - Units: s (seconds), m (minutes), h (hours), d (days), mon (months), y (years)
- *
- * Examples (assuming now() = 2025-01-08T09:00:00Z):
- *   now()+1d        -> 2025-01-09T09:00:00Z
- *   now()+10d+12h   -> 2025-01-18T21:00:00Z
- *   now()-2d+12h    -> 2025-01-06T21:00:00Z
- *
- * @param {string} expression - Input string like "now()+1d+3h"
- * @param {{ now?: Date }} [options] - Optional base time (for deterministic testing)
- * @returns {Date} A new Date in UTC with the calculated offset applied
- */
-function parse(expression, options = {}) {
-  if (typeof expression !== "string") {
-    throw new Error("Expression must be a string");
-  }
+const assert = require("assert");
+const { parse } = require("./parser");
 
-  const trimmed = expression.trim();
-  const NOW_TOKEN = "now()";
-
-  // 1. Expression must begin with "now()"
-  if (!trimmed.startsWith(NOW_TOKEN)) {
-    throw new Error('Expression must start with "now()"');
-  }
-
-  // 2. Determine base time (UTC)
-  const baseNow =
-    options.now instanceof Date ? new Date(options.now.getTime()) : new Date();
-
-  // Work on a copy
-  let result = new Date(baseNow.getTime());
-
-  // 3. Extract the part after "now()"
-  const tail = trimmed.slice(NOW_TOKEN.length);
-
-  // If expression is exactly "now()", return the base time
-  if (tail.length === 0) {
-    return result;
-  }
-
-  // 4. Match sequences like +1d, -2h, +10mon, etc.
-  const tokenRegex = /([+-])(\d+)(s|mon|m|h|d|y)/g;
-
-  let match;
-  let consumedLength = 0;
-
-  while ((match = tokenRegex.exec(tail)) !== null) {
-    const operator = match[1];
-    const amountStr = match[2];
-    const unit = match[3];
-
-    const amount = parseInt(amountStr, 10);
-    if (Number.isNaN(amount)) {
-      throw new Error(`Invalid amount "${amountStr}" in "${expression}"`);
-    }
-
-    // Convert operator + amount into a positive or negative number
-    const delta = operator === "+" ? amount : -amount;
-
-    result = applyOffsetUtc(result, delta, unit);
-
-    // Track how much of the string we've successfully parsed
-    consumedLength += match[0].length;
-  }
-
-  // 5. Ensure no invalid text remains
-  if (consumedLength !== tail.length) {
-    const remaining = tail.slice(consumedLength);
-    throw new Error(
-      `Invalid syntax in expression "${expression}", unexpected "${remaining}"`
-    );
-  }
-
-  return result;
+// Helper to turn a Date into ISO string (always UTC)
+function iso(date) {
+  return date.toISOString();
 }
 
-/**
- * Apply an offset (delta) in a specific unit to a Date, using UTC fields.
- *
- * @param {Date} date - The base date
- * @param {number} delta - Positive or negative number
- * @param {"s"|"m"|"h"|"d"|"mon"|"y"} unit - Unit of time to modify
- * @returns {Date} New Date with the offset applied
- */
-function applyOffsetUtc(date, delta, unit) {
-  const d = new Date(date.getTime()); // Work on a copy
+// Fixed "now" so tests are deterministic
+// This matches the example in the assessment:
+// "Assuming now() returns 2025-01-08T09:00:00Z"
+const FIXED_NOW = new Date("2025-01-08T09:00:00Z");
 
-  switch (unit) {
-    case "s": // seconds
-      d.setUTCSeconds(d.getUTCSeconds() + delta);
-      break;
-
-    case "m": // minutes
-      d.setUTCMinutes(d.getUTCMinutes() + delta);
-      break;
-
-    case "h": // hours
-      d.setUTCHours(d.getUTCHours() + delta);
-      break;
-
-    case "d": // days
-      d.setUTCDate(d.getUTCDate() + delta);
-      break;
-
-    case "mon": // months
-      d.setUTCMonth(d.getUTCMonth() + delta);
-      break;
-
-    case "y": // years
-      d.setUTCFullYear(d.getUTCFullYear() + delta);
-      break;
-
-    default:
-      throw new Error(`Unsupported unit "${unit}"`);
-  }
-
-  return d;
+// 1. now() only
+{
+  const result = parse("now()", { now: FIXED_NOW });
+  assert.strictEqual(iso(result), "2025-01-08T09:00:00.000Z");
 }
 
-// Export for Node.js
-module.exports = {
-  parse,
-  applyOffsetUtc,
-};
+// 2. now()+1d -> 2025-01-09T09:00:00.000Z
+{
+  const result = parse("now()+1d", { now: FIXED_NOW });
+  assert.strictEqual(iso(result), "2025-01-09T09:00:00.000Z");
+}
+
+// 3. now()+8d -> 2025-01-16T09:00:00.000Z
+{
+  const result = parse("now()+8d", { now: FIXED_NOW });
+  assert.strictEqual(iso(result), "2025-01-16T09:00:00.000Z");
+}
+
+// 4. now()+10d+12h -> 2025-01-18T21:00:00.000Z
+{
+  const result = parse("now()+10d+12h", { now: FIXED_NOW });
+  assert.strictEqual(iso(result), "2025-01-18T21:00:00.000Z");
+}
+
+// 5. now()-2d+12h -> 2025-01-06T21:00:00.000Z
+{
+  const result = parse("now()-2d+12h", { now: FIXED_NOW });
+  assert.strictEqual(iso(result), "2025-01-06T21:00:00.000Z");
+}
+
+// 6. Test seconds, minutes, months, years just to show they work
+
+// now()+30s
+{
+  const result = parse("now()+30s", { now: FIXED_NOW });
+  assert.strictEqual(iso(result), "2025-01-08T09:00:30.000Z");
+}
+
+// now()+15m
+{
+  const result = parse("now()+15m", { now: FIXED_NOW });
+  assert.strictEqual(iso(result), "2025-01-08T09:15:00.000Z");
+}
+
+// now()+1mon (1 month later)
+{
+  const result = parse("now()+1mon", { now: FIXED_NOW });
+  // 1 month after Jan 8 2025 is Feb 8 2025
+  assert.strictEqual(iso(result), "2025-02-08T09:00:00.000Z");
+}
+
+// now()+1y (1 year later)
+{
+  const result = parse("now()+1y", { now: FIXED_NOW });
+  assert.strictEqual(iso(result), "2026-01-08T09:00:00.000Z");
+}
+
+// 7. Basic validation: wrong start
+{
+  let errorCaught = false;
+  try {
+    parse("later()+1d", { now: FIXED_NOW });
+  } catch (e) {
+    errorCaught = true;
+  }
+  assert.strictEqual(errorCaught, true);
+}
+
+// 8. Basic validation: junk at the end
+{
+  let errorCaught = false;
+  try {
+    parse("now()+1dXYZ", { now: FIXED_NOW });
+  } catch (e) {
+    errorCaught = true;
+  }
+  assert.strictEqual(errorCaught, true);
+}
+
+console.log("All tests passed!");
